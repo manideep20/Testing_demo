@@ -1,0 +1,5 @@
+{
+  "terminal.integrated.env.windows": {
+    "PATH": "${env:PATH};${env:LOCALAPPDATA}\\Android\\Sdk\\platform-tools;${env:LOCALAPPDATA}\\Android\\Sdk\\emulator;${env:LOCALAPPDATA}\\Android\\Sdk\\cmdline-tools\\latest\\bin"
+  }
+}

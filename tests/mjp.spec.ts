@@ -26,9 +26,6 @@ test.beforeAll(async ({ screen }) => {
 
 test.beforeEach(async ({ screen }, testInfo) => {
   annotatePriority(testInfo);
-  // The previous test's afterEach always force-closes the app, so every test starts from a clean,
-  // fully-closed process (like a real user opening the app fresh) instead of chaining through
-  // whatever screen the last test happened to leave open.
   const state = await ensureAppPreconditionWithRecovery(screen, AppState.POST_CHECKIN_HOME, 'MJP setup');
   if (state !== AppState.POST_CHECKIN_HOME) {
     throw new Error(`MJP setup ended in ${state}, expected POST_CHECKIN_HOME.`);
@@ -48,13 +45,14 @@ test.afterEach(async ({ screen }, testInfo) => {
     }
   }
 
-  // Force-close is the sole, deterministic cleanup/handover step: it hands the next test a fully
-  // closed app instead of chaining through in-app navigation (BACK presses / Exit App prompts),
-  // which was slow and the source of repeated Exit App popups between tests.
-  try {
-    await loginPage.forceCloseApp();
-  } catch (error) {
-    console.log(`MJP app cleanup (force-close) failed: ${error instanceof Error ? error.message : String(error)}`);
+  if (testInfo.status === testInfo.expectedStatus) {
+    await loginPage.recoverToHome().catch((error) => {
+      console.log(`MJP in-app cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  } else {
+    await loginPage.forceCloseApp().catch((error) => {
+      console.log(`MJP app cleanup (force-close) failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
 });
 

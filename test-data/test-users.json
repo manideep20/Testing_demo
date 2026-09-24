@@ -1,0 +1,28 @@
+{
+  "users": [
+    {
+      "id": "SU036",
+      "name": "Deepak Hooda",
+      "role": "SE",
+      "mobileNumber": "9833000103"
+    },
+    {
+      "id": "SU034",
+      "name": "Rajiv Nanda",
+      "role": "SE",
+      "mobileNumber": "9833000101"
+    },
+    {
+      "id": "SU059",
+      "name": "Sneha Kushwaha",
+      "role": "SE",
+      "mobileNumber": "9833000104"
+    },
+    {
+      "id": "SU035",
+      "name": "Sunita Malik",
+      "role": "SE",
+      "mobileNumber": "9833000102"
+    }
+  ]
+}

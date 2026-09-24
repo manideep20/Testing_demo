@@ -167,6 +167,7 @@ test('TC-018 - Password is masked by default and toggles to plaintext with Show'
 
 test('TC-004-NON-SE - Non-SE role credentials are rejected on the mobile app', async ({ screen }) => {
   const loginPage = new LoginPage(screen);
-  await loginPage.login('9999999998', 'test');
+  const loginData = getLoginCaseData('TC-004-NON-SE');
+  await loginPage.login(loginData.mobileNumber, loginData.password);
   await loginPage.expectValidationMessage('User not found');
 });

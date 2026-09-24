@@ -29,9 +29,12 @@ test.beforeAll(async ({ screen }) => {
 
 test.beforeEach(async ({ screen }, testInfo) => {
   annotatePriority(testInfo);
-  const state = await ensureAppPreconditionWithRecovery(screen, AppState.POST_CHECKIN_HOME, 'End Day setup');
-  if (state !== AppState.POST_CHECKIN_HOME) {
-    throw new Error(`End Day setup ended in ${state}, expected POST_CHECKIN_HOME.`);
+  const expectedState = testInfo.title.startsWith('TC-051')
+    ? AppState.DAY_COMPLETED
+    : AppState.POST_CHECKIN_HOME;
+  const state = await ensureAppPreconditionWithRecovery(screen, expectedState, 'End Day setup');
+  if (state !== expectedState) {
+    throw new Error(`End Day setup ended in ${state}, expected ${expectedState}.`);
   }
 });
 
@@ -48,31 +51,11 @@ test.afterEach(async ({ screen }, testInfo) => {
     }
   }
 
-  // Force-close is the sole, deterministic cleanup/handover step: it hands the next test a fully
-  // closed app instead of chaining through in-app navigation (BACK presses / Exit App prompts),
-  // which was slow and the source of repeated Exit App popups between tests.
-  try {
-    await loginPage.forceCloseApp();
-  } catch (error) {
-    console.log(`End Day app cleanup (force-close) failed: ${error instanceof Error ? error.message : String(error)}`);
+  if (testInfo.status !== testInfo.expectedStatus) {
+    await loginPage.forceCloseApp().catch((error) => {
+      console.log(`End Day app cleanup (force-close) failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
-});
-
-test('TC-048 - Complete End Day check-out flow successfully', async ({ screen }) => {
-  const homePage = new HomePage(screen);
-  const endDayPage = new EndDayPage(screen);
-  const initialReading = String(getCaseData('TC-048').odometerReading);
-
-  await homePage.openEndDay();
-  await endDayPage.expectEndDayScreen();
-  await endDayPage.captureOdometerPhoto();
-  const reading = await endDayPage.enterUntilConfirmation(initialReading);
-  await endDayPage.expectConfirmationDetails(reading);
-  await endDayPage.confirmEndDay();
-  await endDayPage.expectEndDaySuccess();
-  await endDayPage.goToDashboard();
-  await endDayPage.backToHome();
-  await homePage.expectHomeScreen();
 });
 
 test('TC-049 - End Day rejects a reading below the Start Day reading', async ({ screen }) => {
@@ -110,17 +93,27 @@ test('TC-050 - End Day remark is preserved through Confirm Details', async ({ sc
   await endDayPage.expectRemark(remark);
 });
 
-test('TC-051 - Day Completed summary is displayed after End Day', async ({ screen }) => {
+// This is the only case that commits End Day. Keep it after validation-only cases so the selected
+// user remains checked in while TC-049 and TC-050 exercise the form.
+test('TC-048 - Complete End Day check-out flow successfully', async ({ screen }) => {
   const homePage = new HomePage(screen);
   const endDayPage = new EndDayPage(screen);
   const initialReading = String(getCaseData('TC-048').odometerReading);
 
   await homePage.openEndDay();
+  await endDayPage.expectEndDayScreen();
   await endDayPage.captureOdometerPhoto();
   const reading = await endDayPage.enterUntilConfirmation(initialReading);
+  await endDayPage.expectConfirmationDetails(reading);
   await endDayPage.confirmEndDay();
   await endDayPage.expectEndDaySuccess();
   await endDayPage.goToDashboard();
+});
+
+test('TC-051 - Day Completed summary is displayed after End Day', async ({ screen }) => {
+  const homePage = new HomePage(screen);
+  const endDayPage = new EndDayPage(screen);
+
   await expect(screen.getByText(/Day Completed|Start odometer|End odometer|Outlets Visited|Active Duration/i)).toBeVisible({
     timeout: 15_000,
   });

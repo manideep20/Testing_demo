@@ -6,9 +6,7 @@
 			"type": "shell",
 			"command": "npm",
 			"args": [
-				"test",
-				"--",
-				"--reporter=line"
+				"test"
 			],
 			"isBackground": false,
 			"problemMatcher": []

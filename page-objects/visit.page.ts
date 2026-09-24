@@ -121,6 +121,39 @@ export class VisitPage {
     ], { windowsHide: true });
   }
 
+  private async pullOutletDetailsToRefresh(): Promise<void> {
+    const adbPath = `${process.env.LOCALAPPDATA ?? ''}\\Android\\Sdk\\platform-tools\\adb.exe`;
+    const { stdout } = await execFileAsync(adbPath, ['devices'], { windowsHide: true });
+    const deviceId = stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim().split(/\s+/))
+      .find(([id, state]) => id && state === 'device' && !id.startsWith('emulator-'))?.[0];
+    if (!deviceId) {
+      throw new Error('No connected real Android device was found for the outlet refresh gesture.');
+    }
+
+    const { stdout: sizeOutput } = await execFileAsync(adbPath, ['-s', deviceId, 'shell', 'wm', 'size'], {
+      windowsHide: true,
+    });
+    const sizeMatch = sizeOutput.match(/Physical size:\s*(\d+)x(\d+)/i);
+    const displayWidth = sizeMatch ? Number(sizeMatch[1]) : 1440;
+    const displayHeight = sizeMatch ? Number(sizeMatch[2]) : 3120;
+    const x = Math.round(displayWidth / 2);
+
+    await execFileAsync(adbPath, [
+      '-s',
+      deviceId,
+      'shell',
+      'input',
+      'swipe',
+      String(x),
+      String(Math.round(displayHeight * 0.16)),
+      String(x),
+      String(Math.round(displayHeight * 0.87)),
+      '1400',
+    ], { windowsHide: true });
+  }
+
   async openAnyOutletFromList(
     detailPattern: RegExp = /You are\s+[\d,.]+\s*(?:m|km)\s+away|Move within 100m|outside the geofence|farther than 100m/i,
     allowPendingApproval = false,
@@ -1116,8 +1149,8 @@ export class VisitPage {
       return values.length > 0;
     };
 
-    console.log(`Visit Flow: pulling down to refresh Outlet Details location state for "${outlet}".`);
-    await this.screen.swipe('down', { distance: 350, duration: 600 }).catch(() => undefined);
+    console.log(`Visit Flow: long-pulling Outlet Details down to refresh location state for "${outlet}".`);
+    await this.pullOutletDetailsToRefresh();
     // Give the app time to settle after the gesture before checking anything, then confirm we are
     // still on Outlet Details (a swipe on this device can occasionally background the whole app).
     await new Promise((resolve) => setTimeout(resolve, 3_000));
@@ -1503,6 +1536,7 @@ export class VisitPage {
     }
     await expect(capturePhoto).toBeVisible({ timeout: 10_000 });
     await capturePhoto.tap();
+    await captureVisitPhoto(this.screen);
 
     const submit = this.screen.getByText(/Submit Request|Submit Closure|Confirm/i);
     await expect(submit).toBeVisible({ timeout: 120_000 });
@@ -1665,8 +1699,13 @@ export class VisitPage {
     const resume = this.screen.getByText('Resume', { exact: true })
       .or(this.screen.getByLabel('Resume'));
     const activeVisit = this.screen.getByText('ACTIVE VISIT', { exact: true });
+    const taskScreen = this.screen.getByText(
+      /Visit Checklist|Brand Availability|Impactful Visibility|TIL Marketing Elements|Sell-in Order Discussion|CSM Gift Distribution|Spot Sales|Report Issue/i,
+    );
     const hasResume = await resume.isVisible({ timeout: 1_000 }).catch(() => false);
-    if (!hasResume && !(await activeVisit.isVisible({ timeout: 1_000 }).catch(() => false))) {
+    const hasActiveVisit = await activeVisit.isVisible({ timeout: 1_000 }).catch(() => false);
+    const hasTaskScreen = await taskScreen.isVisible({ timeout: 1_000 }).catch(() => false);
+    if (!hasResume && !hasActiveVisit && !hasTaskScreen) {
       return;
     }
 
@@ -1675,8 +1714,9 @@ export class VisitPage {
     }
     const noTasksMessage = this.screen.getByText(/No tasks completed/i);
     const remarksCandidates = [
-      this.screen.getByPlaceholder('Add any remarks about this visit. Required if no tasks are completed.'),
-      this.screen.getByRole('textfield', { name: 'Add any remarks about this visit. Required if no tasks are completed.' }),
+      this.screen.getByPlaceholder('Add any remarks about this visit. Required if no tasks are completed.')
+        .or(this.screen.getByPlaceholder('Type your comment/remark here...')),
+      this.screen.getByRole('textfield', { name: /remark|comment/i }),
       this.screen.getByRole('textfield'),
     ];
     if (await noTasksMessage.isVisible({ timeout: 5_000 }).catch(() => false)) {
@@ -1758,10 +1798,16 @@ export class VisitPage {
 
     if (await noTasksMessage.isVisible({ timeout: 1_000 }).catch(() => false)) {
       const postEndRemark = this.screen.getByPlaceholder('Add any remarks about this visit. Required if no tasks are completed.')
-        .or(this.screen.getByRole('textfield', { name: 'Add any remarks about this visit. Required if no tasks are completed.' }))
+        .or(this.screen.getByPlaceholder('Type your comment/remark here...'))
+        .or(this.screen.getByRole('textfield', { name: /remark|comment/i }))
         .or(this.screen.getByRole('textfield'));
       if (await postEndRemark.isVisible({ timeout: 1_000 }).catch(() => false)) {
-        await postEndRemark.fill(await noTasksMessage.getText());
+        const visibleInstruction = await noTasksMessage.getText();
+        const remarkText = visibleInstruction.split(/\r?\n|If you/i)[0].trim();
+        if (!remarkText) {
+          throw new Error('The End Visit form did not expose text from which cleanup remarks could be derived.');
+        }
+        await postEndRemark.fill(remarkText);
         await end.tap().catch(() => undefined);
       }
     }
@@ -1795,6 +1841,64 @@ export class VisitPage {
       for (const node of nodes) collect(node);
       throw new Error(`Active visit cleanup did not return to Home or Awaiting Sync. Visible UI: ${[...new Set(visibleText)].join(' | ')}`);
     }
+  }
+
+  // An in-progress visit replaces "Start Visit" with "Resume" on the outlet card and blocks
+  // "Check out for the day" entirely, so a visit left open by one test breaks every later test and
+  // any checkout/logout. The active-visit affordance sits below the fold on Home, so scroll to find
+  // it rather than only probing the current viewport.
+  async endAnyActiveVisit(): Promise<boolean> {
+    const resume = this.screen.getByText('Resume', { exact: true })
+      .or(this.screen.getByLabel('Resume'));
+    const activeVisit = this.screen.getByText('ACTIVE VISIT', { exact: true });
+    const taskScreen = this.screen.getByText(
+      /Visit Checklist|Brand Availability|Impactful Visibility|TIL Marketing Elements|Sell-in Order Discussion|CSM Gift Distribution|Spot Sales|Report Issue/i,
+    );
+    const outletDetails = this.screen.getByText(/Outlet Details|Outlet Summary/i);
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await dismissExitPromptIfVisible(this.screen);
+      const hasResume = await resume.isVisible({ timeout: 500 }).catch(() => false);
+      const hasActiveVisit = await activeVisit.isVisible({ timeout: 300 }).catch(() => false);
+      const hasTaskScreen = await taskScreen.isVisible({ timeout: 300 }).catch(() => false);
+      if (hasResume) {
+        console.log('Visit Flow: Resume detected during cleanup; reopening and ending the active visit.');
+        await resume.tap();
+        await expect(taskScreen).toBeVisible({ timeout: 15_000 });
+        await this.endVisit();
+        const journey = this.screen.getByText(
+          /^(?:Continue )?Journey$|Go to Journey|Back to Journey/i,
+        );
+        if (await journey.isVisible({ timeout: 5_000 }).catch(() => false)) {
+          await journey.tap();
+        }
+        await expect(this.screen.getByText(/Today's Plan|Today’s Plan/i)).toBeVisible({ timeout: 15_000 });
+        return true;
+      }
+      if (hasTaskScreen) {
+        console.log('Visit Flow: active Visit Tasks screen detected during cleanup; ending the visit.');
+        await this.endVisit();
+        const journey = this.screen.getByText(
+          /^(?:Continue )?Journey$|Go to Journey|Back to Journey/i,
+        );
+        if (await journey.isVisible({ timeout: 5_000 }).catch(() => false)) {
+          await journey.tap();
+        }
+        await expect(this.screen.getByText(/Today's Plan|Today’s Plan/i)).toBeVisible({ timeout: 15_000 });
+        return true;
+      }
+      if (hasActiveVisit) {
+        console.log('Visit Flow: active visit detected during cleanup; ending it before continuing.');
+        await this.closeActiveVisitIfPresent();
+        return true;
+      }
+      if (await outletDetails.isVisible({ timeout: 300 }).catch(() => false)) {
+        return false;
+      }
+      await this.screen.swipe('up', { distance: 450, duration: 400 }).catch(() => undefined);
+    }
+
+    return false;
   }
 
   async tapStartVisitAndVerify(): Promise<void> {
@@ -1916,11 +2020,22 @@ export class VisitPage {
     // "Add any remarks about this visit. Required if no tasks are completed."); fill it if present
     // rather than assuming the visit ends immediately, since a blank required field silently blocks
     // the subsequent confirm tap otherwise.
-    const remarks = this.screen.getByRole('textfield', { name: /remark/i })
-      .or(this.screen.getByPlaceholder('Type your comment/remark here...'));
+    const remarks = this.screen.getByRole('textfield', { name: /remark|comment/i })
+      .or(this.screen.getByPlaceholder('Add any remarks about this visit. Required if no tasks are completed.'))
+      .or(this.screen.getByPlaceholder('Type your comment/remark here...'))
+      .or(this.screen.getByRole('textfield'));
     if (await remarks.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      const noTasksMessage = this.screen.getByText(/No tasks completed/i);
+      const remarksHeading = this.screen.getByText('Visit Remarks / Comments', { exact: true });
+      const sourceText = await noTasksMessage.isVisible({ timeout: 500 }).catch(() => false)
+        ? await noTasksMessage.getText()
+        : await remarksHeading.getText();
+      const remarkText = sourceText.split(/\r?\n|If you/i)[0].trim();
+      if (!remarkText) {
+        throw new Error('The End Visit form did not expose text from which visit remarks could be derived.');
+      }
       await remarks.tap();
-      await remarks.fill('Automated test - end of visit remarks');
+      await remarks.fill(remarkText);
       // Dismiss the keyboard (it otherwise stays open and covers the End Visit button below) by
       // tapping a static heading rather than pressing BACK, which risks navigating away instead.
       const heading = this.screen.getByText('Visit Remarks / Comments', { exact: true });
@@ -1999,9 +2114,34 @@ export class VisitPage {
     }));
     await expect(journey).toBeVisible({ timeout: 15_000 });
     await journey.tap();
-    await expect(
-      this.screen.getByText(/Awaiting Sync|item awaiting sync|Tap to open/i),
-    ).toBeVisible({ timeout: 15_000 });
+    await expect(this.screen.getByText(/Today's Plan|Today’s Plan/i)).toBeVisible({ timeout: 15_000 });
+
+    const adbPath = `${process.env.LOCALAPPDATA ?? ''}\\Android\\Sdk\\platform-tools\\adb.exe`;
+    const { stdout: devicesOutput } = await execFileAsync(adbPath, ['devices'], { windowsHide: true });
+    const deviceId = devicesOutput
+      .split(/\r?\n/)
+      .map((line) => line.trim().split(/\s+/))
+      .find(([id, state]) => id && state === 'device' && !id.startsWith('emulator-'))?.[0];
+    if (!deviceId) {
+      throw new Error('No connected real Android device was found while checking the sync notification.');
+    }
+
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      const { stdout } = await execFileAsync(
+        adbPath,
+        ['-s', deviceId, 'shell', 'cmd', 'notification', 'list'],
+        { windowsHide: true },
+      );
+      if (stdout.split(/\r?\n/).some((key) => (
+        key.includes('|com.peakline.sfa|') && key.includes('|pending-submissions|')
+      ))) {
+        console.log('Visit Flow: Route Apex pending-submissions notification is active.');
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+
+    throw new Error('Journey opened, but Route Apex did not publish an active pending-submissions notification.');
   }
 
   async expectHelpAndSupport(): Promise<void> {

@@ -56,9 +56,6 @@ test.beforeAll(async ({ screen }) => {
 
 test.beforeEach(async ({ screen }, testInfo) => {
   annotatePriority(testInfo);
-  const loginPage = new LoginPage(screen);
-
-  await loginPage.forceCloseApp();
   const state = await ensureAppPreconditionWithRecovery(screen, AppState.PRE_CHECKIN_HOME, 'Start Day setup');
   if (state !== AppState.PRE_CHECKIN_HOME) {
     throw new Error(`Start Day setup ended in ${state}, expected PRE_CHECKIN_HOME.`);
@@ -79,7 +76,9 @@ test.afterEach(async ({ screen }, testInfo) => {
     }
   }
   await startDayPage.cancelIfVisible().catch(() => false);
-  await loginPage.forceCloseApp();
+  if (testInfo.status !== testInfo.expectedStatus) {
+    await loginPage.forceCloseApp();
+  }
 });
 
 test('TC-010 - Next remains disabled until both odometer photo and reading are provided', async ({ screen }) => {

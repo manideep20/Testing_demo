@@ -11,7 +11,7 @@
     {"id":"TC-010","title":"Next remains disabled until both odometer photo and reading are provided","feature":"Start Day (Check-in)","priority":"High","testData":{"odometerReading":16659,"photo":"CAPTURE_VIA_IN_APP_CAMERA"}},
     {"id":"TC-012","title":"Deleting a captured odometer photo resets capture state and disables Next","feature":"Start Day (Check-in)","priority":"Medium","testData":{}},
     {"id":"TC-013","title":"Confirm Details accurately reflects data entered and captured in step 1","feature":"Start Day (Check-in)","priority":"High","testData":{"odometerReading":16659,"photo":"CAPTURE_VIA_IN_APP_CAMERA"}},
-    {"id":"TC-017","title":"Mobile Number displays all entered digits in plain text","feature":"SE Login","priority":"Medium","testData":{"mobileNumber":"9833000118"}},
+    {"id":"TC-017","title":"Mobile Number displays all entered digits in plain text","feature":"SE Login","priority":"Medium","testData":{"accountId":"QA_SE_VALID","mobileNumber":"1000000009"}},
     {"id":"TC-018","title":"Password is masked by default and toggles to plaintext with Show","feature":"SE Login","priority":"Medium","testData":{"mobileNumber":"1000000009","password":"test"}},
     {"id":"TC-023","title":"Planned tab displays outlets matching today's published MJP web plan","feature":"Post Check-in - PJP Outlet List","priority":"Very High","testData":{"plannedOutletCount":8}},
     {"id":"TC-024","title":"Planned/Completed/Remaining counters accurately reflect the outlet list","feature":"Post Check-in - PJP Outlet List","priority":"High","testData":{"plannedOutletCount":8}},
@@ -52,8 +52,8 @@
     ,{"id":"TC-020","title":"Odometer Reading accepts or validates a decimal value consistently","feature":"Start Day (Check-in)","platform":"Mobile App","priority":"Low","testData":{"odometerReading":12.5}}
     ,{"id":"TC-021","title":"Odometer Reading validates an unrealistically large value","feature":"Start Day (Check-in)","platform":"Mobile App","priority":"Medium","testData":{"odometerReading":999999999}}
     ,{"id":"TC-044-CANCEL-CLOSURE","title":"Cancelling a pending outlet closure request restores the outlet to its normal state","feature":"Approvals","platform":"Mobile App","priority":"High","testData":{"approvalType":"Outlet Closed"}}
-    ,{"id":"TC-045","title":"Cancelling a pending location correction request restores the outlet's normal geofence-gated state","feature":"Approvals","platform":"Mobile App","priority":"High","testData":{"approvalType":"Outlet Updates"}}
+    ,{"id":"TC-045","title":"Cancelling a pending location correction request restores the outlet's normal geofence-gated state","feature":"Approvals","platform":"Mobile App","priority":"High","testData":{"approvalType":"Outlet Updates","correctionDistanceMeters":25,"reason":"Automated location correction verification"}}
     ,{"id":"TC-046","title":"Cancelling a pending New Outlet request removes it from Today's Plan's Unplanned section","feature":"Approvals","platform":"Mobile App","priority":"Medium","testData":{"approvalType":"New Outlet"}}
-    ,{"id":"TC-058","title":"A task can be data-saved without counting toward the visit completion tally","feature":"Visit Flow","platform":"Mobile App","priority":"Medium","testData":{"task":"Brand Availability"}}
+    ,{"id":"TC-058","title":"A task can be data-saved without counting toward the visit completion tally","feature":"Visit Flow","platform":"Mobile App","priority":"Medium","testData":{"tasks":["Brand Availability","Impactful Visibility"],"fallbackFieldValue":40}}
   ]
 }

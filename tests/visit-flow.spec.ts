@@ -42,6 +42,19 @@ const openOutletAtItsSavedLocation = async (screen: Screen, visitPage = new Visi
   return visitPage;
 };
 
+const openConfiguredNumericTask = async (visitPage: VisitPage, caseId: string): Promise<void> => {
+  const configuredTasks = await visitPage.getConfiguredVisitTaskNames();
+  const supportedTasks = getCaseData(caseId).tasks as string[];
+  const task = supportedTasks.find((candidate) => configuredTasks.includes(candidate));
+  if (!task) {
+    throw new Error(
+      `${caseId} requires one of the configured numeric tasks (${supportedTasks.join(', ')}), `
+      + `but this outlet exposes: ${configuredTasks.join(', ') || 'none'}.`,
+    );
+  }
+  await visitPage.startVisitTask(task);
+};
+
 // Keep failure evidence without paying the device-recording/storage cost for every passing test.
 test.use({ video: 'retain-on-failure' });
 
@@ -62,6 +75,7 @@ test.beforeAll(async ({ screen }) => {
   if (state !== AppState.POST_CHECKIN_HOME) {
     throw new Error(`Visit Flow one-time setup ended in ${state}, expected POST_CHECKIN_HOME.`);
   }
+  await new VisitPage(screen).endAnyActiveVisit();
 });
 
 test.beforeEach(async ({ screen }, testInfo) => {
@@ -77,6 +91,7 @@ test.beforeEach(async ({ screen }, testInfo) => {
   if (preCondition !== AppState.POST_CHECKIN_HOME) {
     throw new Error(`Visit Flow setup ended in ${preCondition}, expected POST_CHECKIN_HOME.`);
   }
+  await new VisitPage(screen).endAnyActiveVisit();
 });
 
 test.afterEach(async ({ screen }, testInfo) => {
@@ -98,6 +113,14 @@ test.afterEach(async ({ screen }, testInfo) => {
     console.log(`Visit Flow location cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
+  // An active visit blocks "Check out for the day" and turns the next test's "Start Visit" into
+  // "Resume", so end it before force-closing rather than leaking it into the following test.
+  try {
+    await new VisitPage(screen).endAnyActiveVisit();
+  } catch (error) {
+    console.log(`Visit Flow active-visit cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
   // Force-close is the sole, deterministic cleanup/handover step: it hands the next test a fully
   // closed app instead of chaining through in-app navigation (BACK presses / Exit App prompts),
   // which was slow and the source of repeated Exit App popups between tests.
@@ -113,7 +136,7 @@ test('TC-033 - Start Visit is disabled outside the 100m geofence', async ({ scre
   const visitPage = new VisitPage(screen);
   const outlet = await visitPage.openAnyOutletFromList(undefined, false, true);
   if (!outlet) throw new Error('TC-033 requires a Start Visit eligible outlet, but none was available.');
-  await visitPage.ensureGeofenceDistance(outlet, 250);
+  await visitPage.ensureGeofenceDistance(outlet, getCaseData('TC-033').distanceMeters as number);
   const distanceMessage = screen.getByText(/You are\s+[\d,.]+\s*(?:m|km)\s+away|Move within 100m|outside the geofence|farther than 100m/i);
   await expect(distanceMessage).toBeVisible({ timeout: 10_000 });
   console.log(`TC-033: selected outlet "${outlet}"; distance warning: ${await distanceMessage.getText().catch(() => 'visible')}`);
@@ -123,6 +146,8 @@ test('TC-033 - Start Visit is disabled outside the 100m geofence', async ({ scre
 test('TC-034 - Start Visit is enabled within the 100m geofence', async ({ screen }) => {
   await ensureVisitReady(screen);
   const visitPage = await openOutletAtItsSavedLocation(screen);
+  const outlet = visitPage.getActiveOutletName();
+  await visitPage.setGeofenceDistance(outlet, getCaseData('TC-034').distanceMeters as number);
   await visitPage.expectInRangeLocationStatus();
   await visitPage.expectStartVisitEnabled(true);
 });
@@ -161,9 +186,9 @@ test('TC-038 - Mark as Closed is actionable only within the outlet geofence', as
   console.log(`TC-038: configured outside/inside distance examples ${distances.join(', ')}m; using the live outlet coordinates.`);
   const outlet = await visitPage.openAnyOutletFromList(undefined, false, true);
   if (!outlet) throw new Error('TC-038 requires a Start Visit eligible outlet, but none was available.');
-  await visitPage.ensureGeofenceState(outlet, 'outside');
+  await visitPage.setGeofenceDistance(outlet, distances[0]);
   await visitPage.expectMarkAsClosedEnabled(false);
-  await visitPage.ensureGeofenceState(outlet, 'inside');
+  await visitPage.setGeofenceDistance(outlet, distances[1]);
   await visitPage.expectMarkAsClosedEnabled(true);
 });
 
@@ -196,7 +221,7 @@ test('TC-041 - Stock and facing fields accept zero', async ({ screen }) => {
   await ensureVisitReady(screen);
   const visitPage = new VisitPage(screen);
   await visitPage.ensureVisitTasks();
-  await visitPage.startVisitTask('Brand Availability');
+  await openConfiguredNumericTask(visitPage, 'TC-041');
   const value = (getCaseData('TC-041').fieldValues as number[])[0];
   await visitPage.enterNumericValue(value);
   await visitPage.expectNumericValue(value);
@@ -206,7 +231,7 @@ test('TC-042 - Stock and facing fields accept 9999', async ({ screen }) => {
   await ensureVisitReady(screen);
   const visitPage = new VisitPage(screen);
   await visitPage.ensureVisitTasks();
-  await visitPage.startVisitTask('Brand Availability');
+  await openConfiguredNumericTask(visitPage, 'TC-042');
   const value = (getCaseData('TC-042').fieldValues as number[])[0];
   await visitPage.enterNumericValue(value);
   await visitPage.expectNumericValue(value);
@@ -216,7 +241,7 @@ test('TC-043 - Stock and facing fields reject values above 9999', async ({ scree
   await ensureVisitReady(screen);
   const visitPage = new VisitPage(screen);
   await visitPage.ensureVisitTasks();
-  await visitPage.startVisitTask('Brand Availability');
+  await openConfiguredNumericTask(visitPage, 'TC-043');
   const value = (getCaseData('TC-043').fieldValues as number[])[0];
   await visitPage.enterNumericValue(value);
   await visitPage.expectNumericValueRejected(value);
@@ -226,7 +251,7 @@ test('TC-044 - Stock and facing fields reject values below zero', async ({ scree
   await ensureVisitReady(screen);
   const visitPage = new VisitPage(screen);
   await visitPage.ensureVisitTasks();
-  await visitPage.startVisitTask('Brand Availability');
+  await openConfiguredNumericTask(visitPage, 'TC-044');
   const value = (getCaseData('TC-044').fieldValues as number[])[0];
   await visitPage.enterNumericValue(value);
   await visitPage.expectNumericValueRejected(value);
@@ -372,6 +397,9 @@ const openPendingApprovalRequest = async (
   await expect(confirmCancel).toBeVisible({ timeout: 5_000 });
   await confirmCancel.tap();
 
+  // Stay anchored to the Pending approvals screen while checking removal; otherwise a navigation
+  // away from the list would also make findRequestRow() return null and create a false pass.
+  await expect(pendingTab).toBeVisible({ timeout: 10_000 });
   for (let attempt = 0; attempt < 15; attempt += 1) {
     if (!(await findRequestRow())) return;
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -393,7 +421,13 @@ const ensureClosureRequestPending = async (visitPage: VisitPage): Promise<void> 
   await visitPage.submitClosureRequest();
 };
 
-const ensureLocationCorrectionPending = async (visitPage: VisitPage, reason: string): Promise<void> => {
+const ensureLocationCorrectionPending = async (
+  visitPage: VisitPage,
+  outlet: string,
+  distanceMeters: number,
+  reason: string,
+): Promise<void> => {
+  await visitPage.setGeofenceDistance(outlet, distanceMeters);
   await visitPage.submitLocationCorrectionRequest(reason);
 };
 
@@ -417,7 +451,12 @@ test('TC-045 - Cancelling a pending location correction restores geofence gating
   await ensureVisitReady(screen);
   const visitPage = await openOutletAtItsSavedLocation(screen);
   const outlet = visitPage.getActiveOutletName();
-  await ensureLocationCorrectionPending(visitPage, 'Automated test - location correction request');
+  await ensureLocationCorrectionPending(
+    visitPage,
+    outlet,
+    getCaseData('TC-045').correctionDistanceMeters as number,
+    getCaseData('TC-045').reason as string,
+  );
   await openPendingApprovalRequest(screen, getCaseData('TC-045').approvalType as string, outlet);
   await reopenCancelledOutlet(screen, visitPage, outlet);
   await visitPage.ensureGeofenceState(outlet, 'inside');
@@ -442,11 +481,11 @@ test('TC-058 - Saving a task does not increment the completed tally until comple
   const tallyBefore = await visitPage.getCompletedTaskTally();
   expect(tallyBefore).not.toBeNull();
 
-  await visitPage.startVisitTask('Brand Availability');
+  await openConfiguredNumericTask(visitPage, 'TC-058');
   // Fill every outstanding mandatory field this task exposes (per the real app, its "Leave task? >
   // SAVE" control blocks with a "Missing required fields" banner unless every required field has a
   // value), then leave via that SAVE path rather than the "Submit Task" button.
-  const filledCount = await visitPage.fillAllRequiredTaskFields(40 + (Date.now() % 30));
+  const filledCount = await visitPage.fillAllRequiredTaskFields(getCaseData('TC-058').fallbackFieldValue as number);
   expect(filledCount).toBeGreaterThan(0);
   const saveOutcome = await visitPage.leaveTaskAndSave();
   expect(saveOutcome).toBe('saved');

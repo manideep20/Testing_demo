@@ -250,7 +250,9 @@ export async function ensureAppPrecondition(screen: Screen, requiredAppState: Ap
       );
       await loginPage.ensureLoggedOut();
       currentState = AppState.LOGIN_SCREEN;
-    } else if (expectedName && activeName === expectedName) {
+    } else {
+      // Unidentifiable sessions are adopted: every suite runs as the same SE, so forcing a logout
+      // here would only cost a checkout+login cycle without changing who is signed in.
       currentLoggedInMobileNumber = defaultTestUser.mobileNumber;
     }
   }
@@ -1051,12 +1053,21 @@ export class LoginPage {
     if (await this.isLoggedIn()) {
       const expectedName = getSeNameForMobileNumber(mobileNumber);
       const activeName = await this.getActiveSeName();
-      if (expectedName && activeName && expectedName === activeName) {
-        console.log(`Active session already belongs to ${activeName} (${mobileNumber}); skipping logout/login cycle.`);
+      // The whole suite authenticates as a single SE, so an existing session is almost always the
+      // right one. Only tear it down when we can positively prove it belongs to somebody else --
+      // an unidentifiable session (no MOBILE_TEST_USER_NAME configured, or the greeting/profile
+      // simply wasn't readable) must be adopted rather than forcing an expensive and failure-prone
+      // checkout+logout+login cycle on every run.
+      const belongsToAnotherUser = Boolean(expectedName && activeName && expectedName !== activeName);
+      if (!belongsToAnotherUser) {
+        console.log(
+          `Reusing the active session for ${mobileNumber}`
+          + `${activeName ? ` (signed in as ${activeName})` : ' (active user could not be identified)'}.`,
+        );
         currentLoggedInMobileNumber = mobileNumber;
         return;
       }
-      console.log(`Existing session detected (active user: ${activeName ?? 'unknown'}, expected: ${expectedName ?? mobileNumber}); logging out before continuing login`);
+      console.log(`Existing session belongs to ${activeName}, but ${expectedName} (${mobileNumber}) is configured; logging out before continuing login`);
       await this.ensureLoggedOut();
     }
 
@@ -1267,6 +1278,11 @@ export class LoginPage {
     const captureAction = this.screen.getByText('Capture Odometer Photo', { exact: true });
 
     if (!(await captureAction.isVisible({ timeout: 2_000 }).catch(() => false))) {
+      // "Check out for the day" stays unavailable while a visit is still in progress, so any active
+      // visit has to be ended first or the checkout below can never start.
+      const { VisitPage } = await import('./visit.page.js');
+      await new VisitPage(this.screen).endAnyActiveVisit().catch(() => false);
+
       const checkoutAction = this.screen.getByText('Check out for the day', { exact: true });
       if (await checkoutAction.isVisible({ timeout: 2_000 }).catch(() => false)) {
         await homePage.openEndDay();
@@ -1489,6 +1505,13 @@ export class LoginPage {
 
     for (let attempt = 0; attempt < 60; attempt += 1) {
       await this.dismissExitPromptIfVisible();
+
+      // The disclosure is optional and normally absent after the first successful login. As soon as
+      // Home is rendered, stop polling instead of spending up to 20 cycles proving that no disclosure
+      // will appear after an already-completed login.
+      if (!disclosureSeen && await this.isLoggedIn()) {
+        return false;
+      }
 
       for (const agreeButton of agreeButtons) {
         if (await agreeButton.isVisible({ timeout: 300 }).catch(() => false)) {

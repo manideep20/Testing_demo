@@ -149,16 +149,32 @@ export class StartDayPage {
     const editButton = this.screen.getByText(/Edit|Edit Details|Edit details/i);
     if (await editButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
       await editButton.tap();
+      await this.waitForOdometerFormReady();
       return;
     }
 
     const secondaryEdit = this.screen.getByText(/Back|Previous/i);
     if (await secondaryEdit.isVisible({ timeout: 5_000 }).catch(() => false)) {
       await secondaryEdit.tap();
+      await this.waitForOdometerFormReady();
       return;
     }
 
     throw new Error('Edit Details action was not found on the review page.');
+  }
+
+  // After navigating back from the review/confirmation page, the odometer form needs a moment to
+  // re-render with its previously entered value. Reading the field immediately (as the caller does)
+  // can otherwise observe an empty string mid-transition even though the value is preserved.
+  private async waitForOdometerFormReady(): Promise<void> {
+    const input = this.screen.getByPlaceholder('Enter current reading');
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (await input.isVisible({ timeout: 500 }).catch(() => false)) {
+        const value = await input.getValue().catch(() => '');
+        if (value) return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
   }
 
   async confirmStartDay(): Promise<void> {
@@ -242,6 +258,32 @@ export class StartDayPage {
     await expect(this.screen.getByText(/offline|internet|network|connection|available/i)).toBeVisible({ timeout: 15_000 });
   }
 
+  private async confirmDeletionIfPrompted(): Promise<void> {
+    // Some renders show a "Delete photo?" confirmation dialog after the first tap; without confirming
+    // it, the photo is never actually removed and Next stays enabled indefinitely.
+    const confirmCandidates = [
+      this.screen.getByRole('button', { name: /^(Yes|Delete|Confirm|OK)$/i }),
+      this.screen.getByText('Yes', { exact: true }),
+      this.screen.getByText('Delete', { exact: true }),
+      this.screen.getByText('Confirm', { exact: true }),
+      this.screen.getByText('OK', { exact: true }),
+    ];
+    for (const confirm of confirmCandidates) {
+      if (await confirm.isVisible({ timeout: 800 }).catch(() => false)) {
+        await confirm.tap().catch(() => undefined);
+        return;
+      }
+    }
+  }
+
+  private async waitForCapturedPhotoRemoved(): Promise<void> {
+    const capturedLabel = this.screen.getByText('Captured', { exact: true });
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (!(await capturedLabel.isVisible({ timeout: 500 }).catch(() => false))) return;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+
   async deleteCapturedPhoto(): Promise<void> {
     const deleteCandidates = [
       this.screen.getByLabel('Delete'),
@@ -253,6 +295,8 @@ export class StartDayPage {
     for (const deleteButton of deleteCandidates) {
       if (await deleteButton.isVisible({ timeout: 500 }).catch(() => false)) {
         await deleteButton.tap();
+        await this.confirmDeletionIfPrompted();
+        await this.waitForCapturedPhotoRemoved();
         await this.expectNextDisabled();
         return;
       }
@@ -293,6 +337,8 @@ export class StartDayPage {
       )[0];
       if (nearestIcon) {
         await this.screen.getByType(nearestIcon.type).nth(nearestIcon.index).tap().catch(() => undefined);
+        await this.confirmDeletionIfPrompted();
+        await this.waitForCapturedPhotoRemoved();
         await this.expectNextDisabled();
         return;
       }

@@ -38,8 +38,13 @@ export async function dismissExitPromptIfVisible(screen: Screen): Promise<boolea
   for (const cancel of cancelButtons) {
     if (await cancel.isVisible({ timeout: 500 }).catch(() => false)) {
       console.log('Exit App prompt detected; tapping cancel');
-      await cancel.tap();
-      return true;
+      // isVisible() above can report true from a stale/cached read while the dialog is already
+      // animating away (or has been dismissed by a prior iteration); a hanging tap() then burns a
+      // full 10s actionability wait before throwing and crashing whatever recovery loop called this.
+      // Treat a failed tap as "the prompt is already gone" instead of propagating the error.
+      const tapped = await cancel.tap().then(() => true).catch(() => false);
+      if (tapped) return true;
+      break;
     }
   }
 
@@ -598,7 +603,7 @@ export class LoginPage {
         }
       }
 
-      await this.dismissExitPromptIfVisible();
+      const exitPromptDismissed = await this.dismissExitPromptIfVisible();
 
       // A BACK press can occasionally background the whole app instead of just popping the current
       // screen; if that happened, relaunch immediately instead of burning the rest of this attempt
@@ -607,10 +612,19 @@ export class LoginPage {
         await this.ensureAppVisible();
       }
 
+      // BACK from an already-settled Home root re-triggers the "Exit App" prompt every time (it isn't
+      // backgrounding the app). If we just dismissed that prompt, give the UI a brief moment to settle
+      // before the Home check below, instead of immediately looping into another BACK press that would
+      // just show the same prompt again — this was the cause of a real run getting stuck tapping
+      // "Exit App" cancel a dozen times in a row and eventually timing out the whole test.
+      if (exitPromptDismissed) {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+      }
+
       // Use a short timeout here (not the default 15s) since this is one check inside an up-to-8
       // attempt loop; a long per-attempt wait here was the main cause of "hanging"/very slow recovery
       // when the app was slow to reach Home. The loop itself provides the retries.
-      if (await homePage.expectHomeScreen(1_500).then(() => true).catch(() => false)) {
+      if (await homePage.expectHomeScreen(exitPromptDismissed ? 3_000 : 1_500).then(() => true).catch(() => false)) {
         return;
       }
     }
